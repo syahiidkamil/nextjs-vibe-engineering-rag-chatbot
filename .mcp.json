@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--user-data-dir=/Users/syahiidkamil/Projects/80nCompany/nextjs-vibe-engineering-rag-chatbot/docs/browser-profile"]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/postgres?schema=public"
+      ]
+    }
+  }  
+}
