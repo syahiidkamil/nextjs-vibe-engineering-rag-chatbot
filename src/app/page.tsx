@@ -1,9 +1,11 @@
-import { TodoList } from "@/features/todo";
+import { TodoList, getTodos } from "@/features/todo";
 
-export default function Home() {
+export default async function Home() {
+  const todos = await getTodos();
+
   return (
     <div className="flex min-h-svh items-center justify-center p-6">
-      <TodoList />
+      <TodoList todos={todos} />
     </div>
   );
 }
