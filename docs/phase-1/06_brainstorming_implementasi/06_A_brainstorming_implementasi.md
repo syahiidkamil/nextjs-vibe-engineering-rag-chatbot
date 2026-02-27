@@ -50,7 +50,7 @@ W3 ──> W4 (Pemrosesan Dok) ──> W5 ──> W6
 | 4 | **Embedding** | Lihat perbandingan detail di bawah | `gemini-embedding-001` (gratis) |
 | 5 | **Penyimpanan Vektor** | Supabase pgvector / Pinecone / Chroma | Supabase pgvector (DB yang sama) |
 | 6 | **LLM untuk Chat** | Lihat perbandingan detail di bawah | `Gemini 3 Flash Preview` (gratis) |
-| 7 | **Streaming Chat** | Vercel AI SDK / Custom SSE / LangChain | Vercel AI SDK (`useChat` hook) |
+| 7 | **Streaming Chat** | Vercel AI SDK / Custom SSE / LangChain | Custom SSE via direct Gemini HTTPS API (`streamGenerateContent?alt=sse`) |
 | 8 | **Orkestrasi RAG** | Custom pipeline / LangChain / LlamaIndex | Custom (~80 baris kode) |
 
 ### Keputusan 4: Perbandingan Model Embedding
@@ -67,7 +67,7 @@ W3 ──> W4 (Pemrosesan Dok) ──> W5 ──> W6
 
 ### Keputusan 6: Perbandingan LLM untuk Chat
 
-Semua didukung oleh Vercel AI SDK — pindah provider cukup ubah satu baris kode.
+Semua bisa diakses via direct HTTPS API — pindah provider cukup ubah URL endpoint dan format request.
 
 | Model | Provider | Harga (input/output per 1M) | Kecepatan | Konteks | Catatan |
 |-------|----------|---------------------------|-----------|---------|---------|
@@ -78,12 +78,12 @@ Semua didukung oleh Vercel AI SDK — pindah provider cukup ubah satu baris kode
 
 **Rekomendasi: `Gemini 3 Flash Preview`** — Free tier mencukupi demo MVP. Vendor sama dengan embedding = satu API key (`GOOGLE_GENERATIVE_AI_API_KEY`). Context window 1M token. Model terbaru dan tercepat dari Google, 30% lebih hemat token. Kualitas terbaik untuk RAG Q&A.
 
-**Insight utama**: Untuk demo MVP, **Google free tier = biaya $0** untuk embedding DAN chat. Satu vendor, satu API key. Bisa ganti provider kapan saja — Vercel AI SDK membuat perpindahan cukup ubah satu baris.
+**Insight utama**: Untuk demo MVP, **Google free tier = biaya $0** untuk embedding DAN chat. Satu vendor, satu API key. Bisa ganti provider kapan saja — cukup ubah URL endpoint dan format request di `gemini.ts`.
 
-### Dependensi Baru (hanya 3 package)
-- `ai` — Vercel AI SDK core
-- `@ai-sdk/google` — Google Gemini provider (embedding + chat)
+### Dependensi Baru (hanya 1 package)
 - `pdf-parse` — Ekstraksi teks PDF
+
+**Catatan:** Integrasi Gemini (embedding + chat) menggunakan direct HTTPS API via `fetch()` — tanpa SDK tambahan. Ini menghindari bug serialisasi SDK dan memberikan kontrol penuh atas request/response.
 
 ### Variabel Lingkungan Baru
 - `GOOGLE_GENERATIVE_AI_API_KEY` — satu key untuk embedding dan chat (free tier)
@@ -169,7 +169,7 @@ Pengguna bertanya "Janasku terbuat dari apa?"
   2. Pencarian vektor → match_documents() → 5 chunk paling mirip
   3. Bangun konteks → format chunks dengan atribusi sumber
   4. System prompt + konteks + pertanyaan → Gemini 3 Flash Preview
-  5. Stream respons → Vercel AI SDK → klien
+  5. Stream respons → Custom SSE (`streamGenerateContent?alt=sse`) → klien
   6. Tampilkan jawaban + referensi sumber
 ```
 
@@ -182,7 +182,7 @@ Pengguna bertanya "Janasku terbuat dari apa?"
 | Batas rate limit Google free tier | Untuk volume MVP/demo seharusnya cukup; pantau penggunaan |
 | Penyesuaian ukuran chunk | Mulai 1000 karakter / 200 overlap, sesuaikan berdasarkan pengujian dokumen nyata |
 | Timeout pemrosesan dokumen di serverless | Untuk dokumen <10MB seharusnya aman; gunakan pola async jika diperlukan |
-| Kualitas embedding Gemini vs alternatif | 768 dimensi cukup untuk KB kecil; bisa beralih ke OpenAI/Voyage nanti (ubah satu baris) |
+| Kualitas embedding Gemini vs alternatif | 768 dimensi cukup untuk KB kecil; bisa beralih ke OpenAI/Voyage nanti (ubah endpoint di `gemini.ts`) |
 | Akumulasi data di Supabase free tier (1GB storage, 500MB DB) | Dev Tools halaman `/dev-tools` dengan tombol reset untuk membersihkan data selama pengembangan/demo |
 
 ## Bagian 7: Struktur File yang Diusulkan
@@ -221,6 +221,8 @@ src/
     chat/
       types.ts
       index.ts
+      hooks/
+        use-chat.ts                 (baru: custom useChat hook, SSE streaming)
       components/
         chat-container.tsx
         chat-bubble.tsx
@@ -236,7 +238,7 @@ src/
         system-prompt.ts
   shared/
     components/navbar.tsx           (baru)
-    lib/gemini.ts                   (baru)
+    lib/gemini.ts                   (baru: direct HTTPS API, embedding + streaming chat)
 ```
 
 ---
@@ -293,7 +295,7 @@ W3 ──> W4 (Doc Processing) ──> W5 ──> W6
 | 4 | **Embeddings** | See detailed comparison below | `gemini-embedding-001` (free tier) |
 | 5 | **Vector Storage** | Supabase pgvector / Pinecone / Chroma | Supabase pgvector (same DB) |
 | 6 | **LLM for Chat** | See detailed comparison below | `Gemini 3 Flash Preview` (free tier) |
-| 7 | **Chat Streaming** | Vercel AI SDK / Custom SSE / LangChain | Vercel AI SDK (`useChat` hook) |
+| 7 | **Chat Streaming** | Vercel AI SDK / Custom SSE / LangChain | Custom SSE via direct Gemini HTTPS API (`streamGenerateContent?alt=sse`) |
 | 8 | **RAG Orchestration** | Custom pipeline / LangChain / LlamaIndex | Custom (~80 LOC) |
 
 ### Decision 4: Embedding Model Comparison
@@ -310,7 +312,7 @@ W3 ──> W4 (Doc Processing) ──> W5 ──> W6
 
 ### Decision 6: LLM for Chat Comparison
 
-All supported by Vercel AI SDK — switching providers is a one-line change.
+All accessible via direct HTTPS API — switching providers requires changing the endpoint URL and request format.
 
 | Model | Provider | Price (input/output per 1M) | Speed | Context | Notes |
 |-------|----------|---------------------------|-------|---------|-------|
@@ -321,12 +323,12 @@ All supported by Vercel AI SDK — switching providers is a one-line change.
 
 **Recommendation: `Gemini 3 Flash Preview`** — Free tier covers MVP demo. Same vendor as embeddings = single API key (`GOOGLE_GENERATIVE_AI_API_KEY`). 1M context window. Newest and fastest Google model, 30% fewer tokens used. Best quality for RAG Q&A.
 
-**Key insight**: For MVP demo, **Google free tier = $0 cost** for both embeddings AND chat. Single vendor, single API key. Can always switch providers later — Vercel AI SDK makes it a one-line change.
+**Key insight**: For MVP demo, **Google free tier = $0 cost** for both embeddings AND chat. Single vendor, single API key. Can always switch providers later — just change the endpoint URL and request format in `gemini.ts`.
 
-### New Dependencies (only 3 packages)
-- `ai` — Vercel AI SDK core
-- `@ai-sdk/google` — Google Gemini provider (embeddings + chat)
+### New Dependencies (only 1 package)
 - `pdf-parse` — PDF text extraction
+
+**Note:** Gemini integration (embeddings + chat) uses direct HTTPS API via `fetch()` — no additional SDK needed. This avoids SDK serialization bugs and gives full control over request/response.
 
 ### New Environment Variables
 - `GOOGLE_GENERATIVE_AI_API_KEY` — single key for both embeddings and chat (free tier)
@@ -412,7 +414,7 @@ User asks "Janasku terbuat dari apa?"
   2. Vector search → match_documents() → top 5 similar chunks
   3. Build context → format chunks with source attribution
   4. System prompt + context + question → Gemini 3 Flash Preview
-  5. Stream response → Vercel AI SDK → client
+  5. Stream response → Custom SSE (`streamGenerateContent?alt=sse`) → client
   6. Display answer + source references
 ```
 
@@ -425,7 +427,7 @@ User asks "Janasku terbuat dari apa?"
 | Google free tier rate limits | For MVP/demo volumes should be fine; monitor usage |
 | Chunk size tuning | Start 1000 chars / 200 overlap, adjust based on real doc testing |
 | Document processing timeout in serverless | For <10MB docs should be fine; async pattern if needed |
-| Gemini embedding quality vs alternatives | 768 dims is sufficient for small KB; can switch to OpenAI/Voyage later (one-line change) |
+| Gemini embedding quality vs alternatives | 768 dims is sufficient for small KB; can switch to OpenAI/Voyage later (change endpoint in `gemini.ts`) |
 | Data accumulation on Supabase free tier (1GB storage, 500MB DB) | Dev Tools page at `/dev-tools` with reset button to clear data during development/demo |
 
 ## Part 7: Proposed File Structure
@@ -464,6 +466,8 @@ src/
     chat/
       types.ts
       index.ts
+      hooks/
+        use-chat.ts                 (new: custom useChat hook, SSE streaming)
       components/
         chat-container.tsx
         chat-bubble.tsx
@@ -479,5 +483,5 @@ src/
         system-prompt.ts
   shared/
     components/navbar.tsx           (new)
-    lib/gemini.ts                   (new)
+    lib/gemini.ts                   (new: direct HTTPS API, embeddings + streaming chat)
 ```

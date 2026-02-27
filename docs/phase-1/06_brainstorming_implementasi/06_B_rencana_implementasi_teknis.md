@@ -21,9 +21,6 @@ Dokumen ini adalah panduan implementasi langkah-demi-langkah berdasarkan keputus
 ### 0.1 Install Dependencies
 
 ```bash
-# AI & LLM
-bun add ai @ai-sdk/google
-
 # PDF parsing
 bun add pdf-parse
 bun add -D @types/pdf-parse
@@ -31,6 +28,8 @@ bun add -D @types/pdf-parse
 # shadcn components (otomatis ke src/shared/components/ui/)
 bunx shadcn@latest add dialog badge sonner scroll-area alert-dialog dropdown-menu separator progress
 ```
+
+> **Catatan**: Tidak ada dependency AI SDK. Integrasi Gemini menggunakan direct HTTPS API call via `fetch()` — lebih stabil, tanpa bug serialisasi SDK, dan mudah di-debug.
 
 ### 0.2 Environment Variables
 
@@ -167,26 +166,119 @@ create policy "Allow all deletes from documents bucket"
 
 **Catatan penting tentang IVFFlat index**: Index `ivfflat` membutuhkan minimal beberapa row data agar efektif. Untuk MVP dengan sedikit dokumen ini masih akan berfungsi. Jika list count (100) terlalu besar untuk data kecil, PostgreSQL akan fallback ke sequential scan yang tetap cepat untuk dataset kecil.
 
-### 0.5 Shared Gemini Client
+### 0.5 Shared Gemini Client (Direct HTTPS API)
 
 **File baru**: `/src/shared/lib/gemini.ts`
 
 ```typescript
-import { google } from "@ai-sdk/google";
+const API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY!;
+const BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+const CHAT_MODEL = "gemini-3-flash-preview";
+const EMBEDDING_MODEL = "gemini-embedding-001";
 
-// Model untuk chat (streaming LLM response)
-export const chatModel = google("gemini-2.0-flash");
+// --- Embeddings ---
 
-// Model untuk embedding (shared antara knowledge-base processing dan chat query)
-export const embeddingModel = google.textEmbeddingModel(
-  "gemini-embedding-001",
-  { outputDimensionality: 768 }
-);
+export async function embedText(text: string): Promise<number[]> {
+  const res = await fetch(`${BASE_URL}/${EMBEDDING_MODEL}:embedContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": API_KEY,
+    },
+    body: JSON.stringify({
+      content: { parts: [{ text }] },
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Embedding API failed (${res.status}): ${error}`);
+  }
+
+  const data = await res.json();
+  return data.embedding.values;
+}
+
+export async function embedManyTexts(texts: string[]): Promise<number[][]> {
+  return Promise.all(texts.map((t) => embedText(t)));
+}
+
+// --- Chat Streaming ---
+
+type GeminiMessage = {
+  role: "user" | "model";
+  parts: { text: string }[];
+};
+
+export function streamChat(
+  messages: GeminiMessage[],
+  systemPrompt?: string
+): ReadableStream<string> {
+  const body: Record<string, unknown> = { contents: messages };
+  if (systemPrompt) {
+    body.systemInstruction = { parts: [{ text: systemPrompt }] };
+  }
+
+  return new ReadableStream<string>({
+    async start(controller) {
+      const res = await fetch(
+        `${BASE_URL}/${CHAT_MODEL}:streamGenerateContent?alt=sse`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": API_KEY,
+          },
+          body: JSON.stringify(body),
+        }
+      );
+
+      if (!res.ok) {
+        const error = await res.text();
+        controller.error(new Error(`Chat API failed (${res.status}): ${error}`));
+        return;
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop()!;
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr || jsonStr === "[DONE]") continue;
+
+            try {
+              const chunk = JSON.parse(jsonStr);
+              const text = chunk?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+              if (text) controller.enqueue(text);
+            } catch {
+              // skip malformed JSON chunks
+            }
+          }
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
 ```
+
+**Mengapa direct HTTPS, bukan AI SDK**: `@ai-sdk/google` dan `@google/genai` memiliki bug serialisasi pada embedding request (mengirim `parts: [{}]` ke API, menghasilkan error `required oneof field 'data' must have one initialized field`). Direct fetch lebih stabil, mudah di-debug, dan tanpa dependency tambahan.
 
 **Mengapa shared**: Modul ini digunakan oleh dua fitur berbeda (knowledge-base untuk pemrosesan dokumen, chat untuk embed query). Karena berada di `shared/lib/`, kedua fitur bisa mengimportnya tanpa melanggar dependency rule.
 
-**Catatan model**: Menggunakan `gemini-2.0-flash` sebagai fallback stabil. Jika `gemini-3-flash-preview` sudah tersedia dan stabil di AI SDK pada saat implementasi, bisa diganti satu baris. Vercel AI SDK mendeteksi `GOOGLE_GENERATIVE_AI_API_KEY` secara otomatis dari env.
+**Model**: Chat menggunakan `gemini-3-flash-preview`, embedding menggunakan `gemini-embedding-001` (768 dimensi).
 
 ### 0.6 Shared Navbar Component
 
@@ -803,9 +895,8 @@ Parameter: 1000 karakter per chunk, 200 karakter overlap. Bisa disesuaikan berda
 **File baru**: `/src/features/knowledge-base/lib/process-document.ts`
 
 ```typescript
-import { embed } from "ai";
 import { supabase } from "@/shared/lib/supabase";
-import { embeddingModel } from "@/shared/lib/gemini";
+import { embedManyTexts } from "@/shared/lib/gemini";
 import { extractTextFromPdf } from "./pdf-extractor";
 import { splitTextIntoChunks } from "./chunker";
 
@@ -852,24 +943,17 @@ export async function processDocument(documentId: string): Promise<void> {
     // 5. Potong teks menjadi chunks
     const chunks = splitTextIntoChunks(text);
 
-    // 6. Generate embeddings untuk setiap chunk
-    // Batch embeddings untuk efisiensi (Gemini mendukung batch)
-    const embeddingResults = await Promise.all(
-      chunks.map(async (chunk) => {
-        const { embedding } = await embed({
-          model: embeddingModel,
-          value: chunk.content,
-        });
-        return { ...chunk, embedding };
-      })
+    // 6. Generate embeddings untuk semua chunks (batch via direct API)
+    const embeddings = await embedManyTexts(
+      chunks.map((chunk) => chunk.content)
     );
 
     // 7. Simpan chunks + embeddings ke DB
-    const chunkRows = embeddingResults.map((chunk) => ({
+    const chunkRows = chunks.map((chunk, i) => ({
       document_id: documentId,
       content: chunk.content,
       chunk_index: chunk.chunkIndex,
-      embedding: JSON.stringify(chunk.embedding),
+      embedding: JSON.stringify(embeddings[i]),
       metadata: chunk.metadata,
     }));
 
@@ -945,15 +1029,10 @@ return { error: null, documentId: data.id };
 **File baru**: `/src/features/chat/lib/embeddings.ts`
 
 ```typescript
-import { embed } from "ai";
-import { embeddingModel } from "@/shared/lib/gemini";
+import { embedText } from "@/shared/lib/gemini";
 
 export async function embedQuery(query: string): Promise<number[]> {
-  const { embedding } = await embed({
-    model: embeddingModel,
-    value: query,
-  });
-  return embedding;
+  return embedText(query);
 }
 ```
 
@@ -1056,31 +1135,29 @@ ATURAN:
 **File baru**: `/src/features/chat/types.ts`
 
 ```typescript
-import type { Message } from "ai";
-
-// Re-export Message dari Vercel AI SDK untuk convenience
-export type { Message };
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  sources?: ChatSource[];
+};
 
 export type ChatSource = {
   filename: string;
   chunkIndex: number;
 };
-
-// Tipe untuk annotations yang dikirim bersama stream response
-export type SourceAnnotation = {
-  sources: ChatSource[];
-};
 ```
+
+> **Catatan**: Tipe `ChatMessage` didefinisikan sendiri, tanpa dependency ke `UIMessage` dari AI SDK. Sederhana dan sesuai kebutuhan.
 
 ### 3.3 API Route (Chat Endpoint)
 
 **File baru**: `/src/app/api/chat/route.ts`
 
-Ini adalah SATU-SATUNYA exception dari pola "Server Actions only" — chat membutuhkan streaming via POST handler.
+Ini adalah SATU-SATUNYA exception dari pola "Server Actions only" — chat membutuhkan streaming via POST handler. Menggunakan direct SSE (Server-Sent Events) tanpa AI SDK.
 
 ```typescript
-import { streamText } from "ai";
-import { chatModel } from "@/shared/lib/gemini";
+import { streamChat } from "@/shared/lib/gemini";
 import { embedQuery } from "@/features/chat/lib/embeddings";
 import { searchDocuments } from "@/features/chat/lib/vector-search";
 import { buildRagContext } from "@/features/chat/lib/rag-context";
@@ -1089,7 +1166,6 @@ import { getSystemPrompt } from "@/features/chat/lib/system-prompt";
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  // Ambil pertanyaan terakhir dari user
   const lastUserMessage = messages
     .filter((m: { role: string }) => m.role === "user")
     .pop();
@@ -1099,71 +1175,66 @@ export async function POST(req: Request) {
   }
 
   // RAG Pipeline
-  // 1. Embed query
-  const queryEmbedding = await embedQuery(lastUserMessage.content);
-
-  // 2. Vector search
+  const queryText = lastUserMessage.text ?? lastUserMessage.content ?? "";
+  const queryEmbedding = await embedQuery(queryText);
   const searchResults = await searchDocuments(queryEmbedding);
-
-  // 3. Build context
   const { contextText, sources } = buildRagContext(searchResults);
-
-  // 4. Build system prompt
   const systemPrompt = getSystemPrompt(contextText);
 
-  // 5. Stream response
-  const result = streamText({
-    model: chatModel,
-    system: systemPrompt,
-    messages,
-    // Kirim sources sebagai data annotation untuk ditampilkan di UI
-    onFinish({ text }) {
-      // Sources bisa di-log atau disimpan jika diperlukan nanti
+  // Convert ke format Gemini
+  const geminiMessages = messages.map(
+    (m: { role: string; text?: string; content?: string }) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.text ?? m.content ?? "" }],
+    })
+  );
+
+  // Stream dari Gemini, lalu forward ke client sebagai SSE
+  const textStream = streamChat(geminiMessages, systemPrompt);
+  const reader = textStream.getReader();
+
+  const sseStream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "text", text: value })}\n\n`)
+          );
+        }
+        // Kirim sources saat selesai
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "finish", sources })}\n\n`)
+        );
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Stream error";
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`)
+        );
+      } finally {
+        controller.close();
+      }
     },
   });
 
-  // Return streaming response dengan custom header berisi sources
-  const response = result.toDataStreamResponse();
-
-  // Tambahkan sources sebagai custom header (JSON encoded)
-  // Alternatif: gunakan streamText annotations/metadata
-  response.headers.set(
-    "X-Sources",
-    JSON.stringify(sources)
-  );
-
-  return response;
+  return new Response(sseStream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 ```
 
-**Catatan tentang pengiriman sources ke client**: Ada beberapa pendekatan:
-
-1. **Custom header** (`X-Sources`) — sederhana, tapi header dikirim di awal sebelum streaming selesai.
-2. **Stream annotation** via Vercel AI SDK `data` — lebih proper, sources dikirim sebagai bagian dari stream.
-3. **Append ke akhir teks** dengan delimiter — hacky tapi sederhana.
-
-**Rekomendasi**: Gunakan pendekatan **Vercel AI SDK data stream** (`createDataStreamResponse` + `appendMessageAnnotation`). Ini yang paling proper dan built-in di `useChat`.
-
-```typescript
-// Pendekatan yang lebih proper menggunakan data annotations:
-import { streamText, createDataStreamResponse } from "ai";
-
-// Di dalam POST handler:
-return createDataStreamResponse({
-  execute: async (dataStream) => {
-    // Append sources sebagai annotation
-    dataStream.writeMessageAnnotation({ sources });
-
-    const result = streamText({
-      model: chatModel,
-      system: systemPrompt,
-      messages,
-    });
-
-    result.mergeIntoDataStream(dataStream);
-  },
-});
-```
+**Protokol SSE**: Client menerima 3 tipe event:
+- `{"type":"text","text":"..."}` — chunk teks dari Gemini
+- `{"type":"finish","sources":[...]}` — sources dikirim setelah streaming selesai
+- `{"type":"error","message":"..."}` — error handling
+- `[DONE]` — sinyal stream selesai
 
 ### 3.4 Chat Components
 
@@ -1181,24 +1252,38 @@ ChatPage (Server Component - page.tsx)
        └─ ChatInput (form input + tombol kirim)
 ```
 
+**File baru**: `/src/features/chat/hooks/use-chat.ts`
+
+Custom hook menggantikan `@ai-sdk/react`'s `useChat`. Mengelola state messages, mengirim ke `/api/chat`, membaca SSE stream, dan mengekstrak sources dari event `finish`.
+
+```typescript
+"use client";
+
+export function useChat(): {
+  messages: ChatMessage[];
+  sendMessage: (text: string) => void;
+  status: "idle" | "submitted" | "streaming";
+  error: Error | null;
+  regenerate: () => void;
+}
+```
+
+Implementasi: `useState` untuk messages/status/error, `fetch` + `ReadableStream` untuk SSE parsing, `regenerate` menghapus pesan assistant terakhir dan mengirim ulang.
+
 **File baru**: `/src/features/chat/components/chat-container.tsx`
 
 ```typescript
 "use client";
 
-import { useChat } from "@ai-sdk/react";
+import { useChat } from "../hooks/use-chat";
 
-type ChatContainerProps = {
-  // Tidak ada props — self-contained
-};
-
-// Hook: useChat({ api: "/api/chat" })
-// Destructure: messages, input, handleInputChange, handleSubmit, isLoading, error
+// Tidak ada props — self-contained
+// Hook: useChat() dari custom hook (bukan @ai-sdk/react)
 // Conditional render:
 //   - messages.length === 0 → <WelcomeState onSuggestionClick={...} />
 //   - messages.length > 0 → map messages ke <ChatBubble />
-//   - isLoading → <TypingIndicator />
-//   - error → <ErrorMessage onRetry={reload} />
+//   - status === "submitted" → <TypingIndicator />
+//   - error → <ErrorMessage onRetry={regenerate} />
 // Auto-scroll: useRef pada scroll container, scroll ke bawah saat messages berubah
 ```
 
@@ -1225,10 +1310,10 @@ type WelcomeStateProps = {
 **File baru**: `/src/features/chat/components/chat-bubble.tsx`
 
 ```typescript
-import type { Message } from "ai";
+import type { ChatMessage } from "../types";
 
 type ChatBubbleProps = {
-  message: Message;
+  message: ChatMessage;
 };
 
 // User bubble:
@@ -1240,9 +1325,9 @@ type ChatBubbleProps = {
 //   - Rata kiri (flex justify-start)
 //   - Background muted, text foreground
 //   - Rounded corners (rounded-lg rounded-tl-sm)
-//   - Jika message.annotations berisi sources → render <SourceBlock />
-//   - Content di-render sebagai markdown (bisa pakai simple regex untuk bold/list)
-//     Untuk MVP: gunakan `whitespace-pre-wrap` dan simple formatting
+//   - Tampilkan message.text langsung (bukan parts array)
+//   - Jika message.sources ada → render <SourceBlock />
+//   - Untuk MVP: gunakan `whitespace-pre-wrap` dan simple formatting
 ```
 
 **File baru**: `/src/features/chat/components/source-block.tsx`
@@ -1316,7 +1401,7 @@ type ErrorMessageProps = {
 
 ```typescript
 export { ChatContainer } from "./components/chat-container";
-export type { ChatSource, SourceAnnotation } from "./types";
+export type { ChatMessage, ChatSource } from "./types";
 ```
 
 #### Page
@@ -1343,14 +1428,14 @@ export default function ChatPage() {
 ┌─────────────────────────────────────────────────────────────┐
 │ CLIENT (Browser)                                             │
 │                                                              │
-│  ChatContainer (useChat hook)                                │
+│  ChatContainer (custom useChat hook)                         │
 │    │                                                         │
 │    ├─ User types message + submit                            │
 │    │    └─ POST /api/chat { messages: [...] }               │
 │    │                                                         │
-│    └─ Receives streaming response                            │
-│         ├─ Text tokens → update messages state               │
-│         └─ Annotations → extract sources for SourceBlock     │
+│    └─ Reads SSE stream via fetch + ReadableStream            │
+│         ├─ {type:"text"} → append text to assistant message  │
+│         └─ {type:"finish"} → attach sources to message       │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -1358,12 +1443,12 @@ export default function ChatPage() {
 │ SERVER (API Route: /api/chat)                                │
 │                                                              │
 │  1. Parse last user message from messages array              │
-│  2. embedQuery(lastMessage) → float[768]           ←── Gemini│
-│  3. searchDocuments(embedding) → top 5 chunks       ←── pgvec│
+│  2. embedQuery(lastMessage) → float[768]    ←── Gemini HTTPS│
+│  3. searchDocuments(embedding) → top 5 chunks   ←── pgvector│
 │  4. buildRagContext(chunks) → contextText + sources          │
 │  5. getSystemPrompt(contextText) → full prompt               │
-│  6. streamText(model, system, messages) → stream    ←── Gemini│
-│  7. Return DataStreamResponse with sources annotation        │
+│  6. streamChat(messages, system) → stream   ←── Gemini HTTPS│
+│  7. Forward as SSE: text chunks + finish with sources        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -1436,7 +1521,7 @@ Mengikuti panduan dari dokumen sistem desain (`05_sistem_desain_tema_dan_warna.m
 
 ## Ringkasan File yang Dibuat/Diubah
 
-### File Baru (36 file)
+### File Baru (37 file)
 
 ```
 supabase/migrations/<timestamp>_create_rag_infrastructure.sql
@@ -1471,6 +1556,7 @@ src/features/chat/components/welcome-state.tsx
 src/features/chat/components/source-block.tsx
 src/features/chat/components/typing-indicator.tsx
 src/features/chat/components/error-message.tsx
+src/features/chat/hooks/use-chat.ts
 src/features/chat/lib/embeddings.ts
 src/features/chat/lib/vector-search.ts
 src/features/chat/lib/rag-context.ts
@@ -1494,10 +1580,12 @@ src/app/page.tsx        (ubah ke redirect /chat)
 ### Dependencies Baru
 
 ```
-Production: ai, @ai-sdk/google, pdf-parse
+Production: pdf-parse
 Dev: @types/pdf-parse
 shadcn: dialog, badge, sonner, scroll-area, alert-dialog, dropdown-menu, separator, progress
 ```
+
+> **Catatan**: Tidak ada dependency AI SDK (`ai`, `@ai-sdk/google`, `@ai-sdk/react`, `@google/genai`). Semua integrasi Gemini menggunakan direct HTTPS API call via `fetch()` bawaan Node.js/browser.
 
 ---
 
@@ -1524,9 +1612,6 @@ This document is a step-by-step implementation guide based on decisions made in 
 ### 0.1 Install Dependencies
 
 ```bash
-# AI & LLM
-bun add ai @ai-sdk/google
-
 # PDF parsing
 bun add pdf-parse
 bun add -D @types/pdf-parse
@@ -1534,6 +1619,8 @@ bun add -D @types/pdf-parse
 # shadcn components (auto-installed to src/shared/components/ui/)
 bunx shadcn@latest add dialog badge sonner scroll-area alert-dialog dropdown-menu separator progress
 ```
+
+> **Note**: No AI SDK dependencies. Gemini integration uses direct HTTPS API calls via `fetch()` — more stable, no SDK serialization bugs, and easy to debug.
 
 ### 0.2 Environment Variables
 
@@ -1670,26 +1757,20 @@ create policy "Allow all deletes from documents bucket"
 
 **Important note about IVFFlat index**: The `ivfflat` index requires at least some rows of data to be effective. For an MVP with few documents this will still work. If the list count (100) is too large for small data, PostgreSQL will fallback to sequential scan which is fast for small datasets anyway.
 
-### 0.5 Shared Gemini Client
+### 0.5 Shared Gemini Client (Direct HTTPS API)
 
 **New file**: `/src/shared/lib/gemini.ts`
 
-```typescript
-import { google } from "@ai-sdk/google";
+Uses direct `fetch()` calls to Gemini REST API. Exports:
+- `embedText(text)` — single embedding via `embedContent` endpoint
+- `embedManyTexts(texts)` — batch embeddings via `Promise.all`
+- `streamChat(messages, systemPrompt)` — streaming chat via `streamGenerateContent?alt=sse`
 
-// Model for chat (streaming LLM response)
-export const chatModel = google("gemini-2.0-flash");
+**Models**: Chat uses `gemini-3-flash-preview`, embeddings use `gemini-embedding-001` (768 dimensions). API key read from `GOOGLE_GENERATIVE_AI_API_KEY` env var, passed via `x-goog-api-key` header.
 
-// Model for embeddings (shared between knowledge-base processing and chat query)
-export const embeddingModel = google.textEmbeddingModel(
-  "gemini-embedding-001",
-  { outputDimensionality: 768 }
-);
-```
+**Why direct HTTPS, not AI SDK**: `@ai-sdk/google` and `@google/genai` have serialization bugs on embedding requests (sending `parts: [{}]` to the API, causing `required oneof field 'data' must have one initialized field` error). Direct fetch is more stable, easier to debug, and has zero dependencies.
 
 **Why shared**: This module is used by two different features (knowledge-base for document processing, chat for query embedding). Being in `shared/lib/`, both features can import it without violating the dependency rule.
-
-**Model note**: Using `gemini-2.0-flash` as a stable fallback. If `gemini-3-flash-preview` is available and stable in the AI SDK at implementation time, it can be swapped in one line. Vercel AI SDK auto-detects `GOOGLE_GENERATIVE_AI_API_KEY` from env.
 
 ### 0.6 Shared Navbar Component
 
@@ -1907,7 +1988,7 @@ Parameters: 1000 chars per chunk, 200 chars overlap. Returns `TextChunk[]` with 
 
 **New file**: `/src/features/knowledge-base/lib/process-document.ts`
 
-Pipeline: update status "processing" -> download from Storage -> extract text -> chunk -> embed via Gemini -> insert chunks to DB -> update status "ready". On error: update status "error" with message.
+Pipeline: update status "processing" -> download from Storage -> extract text -> chunk -> embed via `embedManyTexts()` (direct Gemini HTTPS) -> insert chunks to DB -> update status "ready". On error: update status "error" with message.
 
 ### 2.4 Integration into Upload Flow
 
@@ -1930,7 +2011,7 @@ After successful metadata insert, call `processDocument(id)` as fire-and-forget 
 
 ### 3.1 Chat Library Files
 
-- `/src/features/chat/lib/embeddings.ts` — `embedQuery(query) -> number[]`
+- `/src/features/chat/lib/embeddings.ts` — `embedQuery(query) -> number[]` (uses `embedText` from gemini.ts)
 - `/src/features/chat/lib/vector-search.ts` — `searchDocuments(embedding, threshold, count) -> SearchResult[]`
 - `/src/features/chat/lib/rag-context.ts` — `buildRagContext(results) -> { contextText, sources }`
 - `/src/features/chat/lib/system-prompt.ts` — `getSystemPrompt(context) -> string`
@@ -1943,12 +2024,12 @@ The ONE exception to "Server Actions only" — needs streaming via POST handler.
 
 RAG pipeline in POST handler:
 1. Parse last user message
-2. Embed query via Gemini
+2. Embed query via Gemini direct HTTPS API
 3. Vector search via match_documents RPC
 4. Build context + sources
 5. Build system prompt
-6. Stream response via Vercel AI SDK `streamText`
-7. Return DataStreamResponse with source annotations
+6. Stream response via `streamChat()` (direct Gemini HTTPS with `?alt=sse`)
+7. Forward as SSE to client: text chunks + finish event with sources
 
 ### 3.3 Chat Components
 
@@ -1966,7 +2047,8 @@ ChatPage (Server Component)
 ```
 
 Files:
-- `/src/features/chat/components/chat-container.tsx` — main orchestrator with `useChat`
+- `/src/features/chat/hooks/use-chat.ts` — custom useChat hook (replaces `@ai-sdk/react`), SSE parsing
+- `/src/features/chat/components/chat-container.tsx` — main orchestrator with custom `useChat`
 - `/src/features/chat/components/welcome-state.tsx` — bot icon + greeting + suggestion chips
 - `/src/features/chat/components/chat-bubble.tsx` — user (right, primary bg) / bot (left, muted bg)
 - `/src/features/chat/components/source-block.tsx` — compact reference card below bot messages
@@ -1977,8 +2059,8 @@ Files:
 ### 3.4 Data Flow
 
 ```
-Client (useChat) -> POST /api/chat -> embedQuery -> searchDocuments -> buildRagContext
-  -> getSystemPrompt -> streamText (Gemini) -> DataStreamResponse -> Client (streaming render)
+Client (custom useChat) -> POST /api/chat -> embedQuery -> searchDocuments -> buildRagContext
+  -> getSystemPrompt -> streamChat (Gemini HTTPS) -> SSE Response -> Client (SSE stream parsing)
 ```
 
 ### Phase 3 Verification
@@ -2008,7 +2090,7 @@ Client (useChat) -> POST /api/chat -> embedQuery -> searchDocuments -> buildRagC
 
 ## File Summary
 
-### New Files (36 files)
+### New Files (37 files)
 
 ```
 supabase/migrations/<timestamp>_create_rag_infrastructure.sql
@@ -2039,6 +2121,7 @@ src/features/chat/components/welcome-state.tsx
 src/features/chat/components/source-block.tsx
 src/features/chat/components/typing-indicator.tsx
 src/features/chat/components/error-message.tsx
+src/features/chat/hooks/use-chat.ts
 src/features/chat/lib/embeddings.ts
 src/features/chat/lib/vector-search.ts
 src/features/chat/lib/rag-context.ts
@@ -2061,7 +2144,9 @@ src/app/page.tsx        (change to redirect /chat)
 ### New Dependencies
 
 ```
-Production: ai, @ai-sdk/google, pdf-parse
+Production: pdf-parse
 Dev: @types/pdf-parse
 shadcn: dialog, badge, sonner, scroll-area, alert-dialog, dropdown-menu, separator, progress
 ```
+
+> **Note**: No AI SDK dependencies (`ai`, `@ai-sdk/google`, `@ai-sdk/react`, `@google/genai`). All Gemini integration uses direct HTTPS API calls via native `fetch()`.

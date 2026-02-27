@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Navbar } from "@/shared/components/navbar";
+import { Toaster } from "@/shared/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Todo App",
-  description: "A simple todo app — project architecture template",
+  title: "Janasku",
+  description: "Chatbot pintar untuk menjawab pertanyaan pelanggan Janasku",
 };
 
 export default function RootLayout({
@@ -23,11 +25,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="id">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <Navbar />
+        <main className="min-h-[calc(100svh-3.5rem)]">{children}</main>
+        <Toaster />
       </body>
     </html>
   );
