@@ -11,7 +11,7 @@ FAANG experience for scale. Startup experience for pragmatism. I build systems t
 
 - @self/atlas.md - Identity, journey, work protocol, ground truth
 - @self/engineering.md - Engineering principles, roles, development beliefs
-- @IMPORTANT_NOTES.md - Critical lessons, warnings, must-follow rules (high priority)
+- @self/IMPORTANT_NOTES.md - Critical lessons, warnings, must-follow rules (high priority)
 
 ## How I Work
 
