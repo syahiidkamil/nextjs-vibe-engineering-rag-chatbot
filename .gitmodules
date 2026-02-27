@@ -1,0 +1,6 @@
+[submodule "docs/anthropic_info/claude-plugins-official"]
+	path = docs/anthropic_info/claude-plugins-official
+	url = git@github.com:anthropics/claude-plugins-official.git
+[submodule "docs/anthropic_info/skills"]
+	path = docs/anthropic_info/skills
+	url = git@github.com:anthropics/skills.git
