@@ -16,15 +16,16 @@ Brand "Janasku" identik dengan rempah dan bahan alami tradisional yang hangat na
 
 Aplikasi ini menggunakan sistem variabel CSS OKLCH bawaan Shadcn Tailwind CSS di `src/app/globals.css`. Pemetaan warna di bawah ini disesuaikan dengan skema Shadcn standar untuk mempertahankan kompatibilitas *copy-paste* komponen.
 
-> **Catatan:** Nilai warna di `globals.css` saat ini merepresentasikan warna kustom yang mendekati tema jingga/oranye. Berikut adalah representasi konseptualnya.
+> **Catatan:** Nilai warna OKLCH aktual didefinisikan di `src/app/globals.css`. Tabel di bawah mencantumkan nilai light mode; dark mode menggunakan hue yang sama dengan lightness lebih tinggi.
 
-| Peran (Shadcn) | Nama Konseptual | Penggunaan Utama | Keterangan / Warna (Kira-kira) |
+| Peran (Shadcn) | Nama Konseptual | Nilai OKLCH (Light) | Penggunaan Utama |
 | --- | --- | --- | --- |
-| `--primary` | **Kunyit (Turmeric)** | Tombol utama, aksi aktif, highlight penting | Oranye pekat (Amber/Orange). Memberi kesan kuat dan sehat. |
-| `--secondary` | **Nanas (Pineapple)** | Tombol sekunder, hover states sekunder | Kuning pudar hingga pastel kuning. Lembut tapi segar. |
-| `--background` | **Jahe Light (Ginger)**| Latar belakang utama aplikasi (Light Mode) | Putih/Krem sangat pucat (off-white). Bersih, mudah dibaca. |
-| `--muted` / `--card`| **Jahe Muted** | Latar belakang komponen kartu, Chat Bubble bot | Abu-abu kehangatan (Warm Gray / Beige). |
-| `--foreground` | **Arang (Charcoal)** | Teks utama | Hitam abu-abu pekat. Nyaman untuk membaca panjang. |
+| `--primary` | **Kunyit (Turmeric)** | `oklch(0.620 0.220 45)` | Tombol utama, aksi aktif, user chat bubble, navbar brand |
+| `--destructive` | **Merah (Red)** | `oklch(0.577 0.245 27.325)` | Tombol hapus, error badge, peringatan — tetap merah |
+| `--secondary` | **Nanas (Pineapple)** | `oklch(0.967 0.001 286.375)` | Tombol sekunder, hover states sekunder |
+| `--background` | **Jahe Light (Ginger)** | `oklch(1 0 0)` | Latar belakang utama aplikasi (Light Mode) |
+| `--muted` / `--card` | **Jahe Muted** | `oklch(0.967 0.001 286.375)` | Latar belakang kartu, Chat Bubble bot |
+| `--foreground` | **Arang (Charcoal)** | `oklch(0.141 0.005 285.823)` | Teks utama |
 
 ---
 

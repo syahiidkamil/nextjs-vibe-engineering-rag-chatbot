@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import { BotIcon, UserIcon } from "lucide-react";
 import { SourceBlock } from "./source-block";
 import type { ChatMessage } from "../types";
@@ -29,7 +30,13 @@ export function ChatBubble({ message }: ChatBubbleProps) {
               : "bg-muted rounded-tl-sm"
           }`}
         >
-          <p className="whitespace-pre-wrap">{message.text}</p>
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{message.text}</p>
+          ) : (
+            <div className="prose prose-sm dark:prose-invert max-w-none">
+              <ReactMarkdown>{message.text}</ReactMarkdown>
+            </div>
+          )}
         </div>
         {!isUser && sources.length > 0 && <SourceBlock sources={sources} />}
       </div>

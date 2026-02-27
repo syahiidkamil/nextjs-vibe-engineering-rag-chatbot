@@ -14,6 +14,7 @@ export async function embedText(text: string): Promise<number[]> {
     },
     body: JSON.stringify({
       content: { parts: [{ text }] },
+      outputDimensionality: 768,
     }),
   });
 
