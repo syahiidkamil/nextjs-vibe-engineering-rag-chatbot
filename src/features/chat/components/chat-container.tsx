@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { Loader2Icon } from "lucide-react";
 import { useChat } from "../hooks/use-chat";
 import { WelcomeState } from "./welcome-state";
 import { ChatBubble } from "./chat-bubble";
@@ -9,7 +10,15 @@ import { TypingIndicator } from "./typing-indicator";
 import { ErrorMessage } from "./error-message";
 
 export function ChatContainer() {
-  const { messages, sendMessage, status, error, regenerate } = useChat();
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+    regenerate,
+    isLoadingHistory,
+    conversationId,
+  } = useChat();
 
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -34,9 +43,17 @@ export function ChatContainer() {
     sendMessage(text);
   }
 
+  if (isLoadingHistory) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <Loader2Icon className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
-      {messages.length === 0 ? (
+      {messages.length === 0 && !conversationId ? (
         <WelcomeState onSuggestionClick={handleSuggestionClick} />
       ) : (
         <div ref={scrollRef} className="flex-1 overflow-y-auto py-4">

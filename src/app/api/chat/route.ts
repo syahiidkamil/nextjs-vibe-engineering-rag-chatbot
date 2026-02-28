@@ -59,6 +59,7 @@ export async function POST(req: Request) {
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
+        console.error("[chat/route] SSE stream error:", err);
         const message = err instanceof Error ? err.message : "Stream error";
         controller.enqueue(
           encoder.encode(

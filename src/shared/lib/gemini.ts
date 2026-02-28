@@ -67,6 +67,7 @@ export function streamChat(
 
       if (!res.ok) {
         const error = await res.text();
+        console.error("[gemini] Chat API failed:", res.status, error);
         controller.error(
           new Error(`Chat API failed (${res.status}): ${error}`)
         );
