@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Janasku | Assistant Dashboard</title>
+    
+    <!-- Google Fonts: Fraunces (Elegant Serif for Brand) & Outfit (Modern Sans for UI) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="./styles.css">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body>
+    <!-- Organic Background Blobs -->
+    <div class="blob-bg">
+        <div class="blob blob-turmeric"></div>
+        <div class="blob blob-pineapple"></div>
+        <div class="blob blob-ginger"></div>
+    </div>
+
+    <div class="app-wrapper">
+        <!-- Main Container -->
+        <main class="dashboard-container">
+            
+            <!-- Left Panel: Context Manager (Admin) -->
+            <section class="panel context-panel">
+                <header class="panel-header">
+                    <div class="brand">
+                        <div class="brand-logo">J</div>
+                        <div>
+                            <h1 class="brand-name">Janasku.</h1>
+                            <p class="brand-subtitle">Knowledge Brain</p>
+                        </div>
+                    </div>
+                    <button class="icon-btn" title="Settings">
+                        <i data-lucide="settings-2"></i>
+                    </button>
+                </header>
+
+                <div class="panel-body scrollable">
+                    <div class="section-block">
+                        <div class="section-title-wrap">
+                            <h2 class="section-title">Feed the AI</h2>
+                            <span class="info-badge">Drag & Drop</span>
+                        </div>
+                        <p class="section-desc">Upload your latest SOP, ingredients list, or pricing guides here. The AI will learn instantly.</p>
+                        
+                        <!-- Upload Target -->
+                        <div class="upload-zone" id="uploadZone">
+                            <div class="upload-icon-ring">
+                                <i data-lucide="cloud-upload" class="upload-icon"></i>
+                            </div>
+                            <h3 class="upload-heading">Drop your documents</h3>
+                            <p class="upload-sub">Supports PDF, TXT, DOCX up to 10MB</p>
+                            <input type="file" id="fileUpload" multiple hidden>
+                            <button class="btn btn-outline" id="browseBtn">Browse Files</button>
+                        </div>
+                    </div>
+
+                    <div class="section-block">
+                        <div class="section-title-wrap">
+                            <h2 class="section-title">Active Knowledge</h2>
+                            <span class="count-badge" id="docCount">2</span>
+                        </div>
+                        
+                        <ul class="doc-list" id="docList">
+                            <!-- Pre-populated items for prototype -->
+                            <li class="doc-card">
+                                <div class="doc-icon type-pdf">
+                                    <i data-lucide="file-text"></i>
+                                </div>
+                                <div class="doc-details">
+                                    <h4 class="doc-name">SOP_Balas_Chat_Janasku.pdf</h4>
+                                    <p class="doc-meta">1.2 MB • Updated 2 hrs ago</p>
+                                </div>
+                                <button class="action-btn delete-btn" title="Remove context">
+                                    <i data-lucide="trash-2"></i>
+                                </button>
+                            </li>
+                            <li class="doc-card">
+                                <div class="doc-icon type-txt">
+                                    <i data-lucide="file-type-2"></i>
+                                </div>
+                                <div class="doc-details">
+                                    <h4 class="doc-name">Daftar_Harga_Update.txt</h4>
+                                    <p class="doc-meta">14 KB • Updated yesterday</p>
+                                </div>
+                                <button class="action-btn delete-btn" title="Remove context">
+                                    <i data-lucide="trash-2"></i>
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Chat Interface (Simulation) -->
+            <section class="panel chat-panel">
+                <div class="chat-glass-container">
+                    
+                    <header class="chat-header">
+                        <div class="agent-profile">
+                            <div class="agent-avatar">
+                                <i data-lucide="sparkles"></i>
+                            </div>
+                            <div class="agent-info">
+                                <h2 class="agent-name">Janasku Assistant</h2>
+                                <p class="agent-status"><span class="status-dot"></span> Online & learning</p>
+                            </div>
+                        </div>
+                        <div class="header-actions">
+                            <button class="icon-btn" title="Clear Chat" id="clearBtn">
+                                <i data-lucide="rotate-ccw"></i>
+                            </button>
+                        </div>
+                    </header>
+                    
+                    <div class="chat-messages" id="chatArea">
+                        <!-- Initial Bot Message -->
+                        <div class="message-row bot-row appear">
+                            <div class="message-avatar">J</div>
+                            <div class="message-content">
+                                <div class="message-bubble bot-bubble">
+                                    Halo! Selamat datang di Janasku 🌱 <br><br>
+                                    Ada yang bisa dibantu terkait minuman herbal <em>Jahe, Nanas, dan Kunyit</em> kita hari ini?
+                                </div>
+                                <span class="message-time">09:00 AM</span>
+                            </div>
+                        </div>
+
+                        <!-- Initial User Message -->
+                        <div class="message-row user-row appear delay-1">
+                            <div class="message-content">
+                                <div class="message-bubble user-bubble">
+                                    Berapa harga satu botolnya min?
+                                </div>
+                                <span class="message-time">09:01 AM</span>
+                            </div>
+                        </div>
+
+                        <!-- Reply -->
+                        <div class="message-row bot-row appear delay-2">
+                            <div class="message-avatar">J</div>
+                            <div class="message-content">
+                                <div class="message-bubble bot-bubble">
+                                    Harga Janasku botol 250ml saat ini <strong>Rp 15.000</strong> ya Kak. <br><br>
+                                    Spesial promo: Beli 4 botol ada potongan jadi <strong>Rp 55.000</strong> saja! Mau pesan berapa botol nih? ✨
+                                </div>
+                                <span class="message-time">09:01 AM</span>
+                            </div>
+                        </div>
+
+                        <!-- Typin indicator placeholder (hidden by default) -->
+                        <div class="message-row bot-row typing-row" id="typingIndicator" style="display: none;">
+                            <div class="message-avatar">J</div>
+                            <div class="message-content">
+                                <div class="message-bubble bot-bubble typing-bubble">
+                                    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Chat Input -->
+                    <div class="chat-input-container">
+                        <div class="input-glass-wrapper">
+                            <button class="action-btn attach-btn" title="Attach image">
+                                <i data-lucide="paperclip"></i>
+                            </button>
+                            <input type="text" id="msgInput" placeholder="Ketik pesan pengujian di sini..." autocomplete="off">
+                            <button class="btn btn-primary send-btn" id="sendBtn">
+                                <i data-lucide="send-horizonal"></i>
+                            </button>
+                        </div>
+                        <p class="footer-note">AI dapat membuat kesalahan. Periksa pedoman SOP pada tab sebelah kiri.</p>
+                    </div>
+
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Script references -->
+    <script src="./app.js"></script>
+</body>
+</html>
