@@ -8,9 +8,10 @@ export type SourceReference = {
 export function buildRagContext(results: SearchResult[]): {
   contextText: string;
   sources: SourceReference[];
+  hasRelevantContext: boolean;
 } {
   if (results.length === 0) {
-    return { contextText: "", sources: [] };
+    return { contextText: "", sources: [], hasRelevantContext: false };
   }
 
   const sourceMap = new Map<string, SourceReference>();
@@ -28,5 +29,6 @@ export function buildRagContext(results: SearchResult[]): {
   return {
     contextText: contextParts.join("\n\n---\n\n"),
     sources: Array.from(sourceMap.values()),
+    hasRelevantContext: results.length > 0,
   };
 }

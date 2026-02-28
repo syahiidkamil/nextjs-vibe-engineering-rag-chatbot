@@ -75,6 +75,7 @@ export async function getMessages(
     role: msg.role,
     text: msg.text,
     sources: msg.sources?.length ? msg.sources : undefined,
+    createdAt: msg.created_at,
   }));
 }
 

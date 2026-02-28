@@ -3,6 +3,7 @@ export type ChatMessage = {
   role: "user" | "assistant";
   text: string;
   sources?: ChatSource[];
+  createdAt: string;
 };
 
 export type ChatSource = {

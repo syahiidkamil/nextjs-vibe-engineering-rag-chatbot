@@ -57,9 +57,10 @@ export function ChatContainer() {
         <WelcomeState onSuggestionClick={handleSuggestionClick} />
       ) : (
         <div ref={scrollRef} className="flex-1 overflow-y-auto py-4">
-          {messages.map((message) => (
-            <ChatBubble key={message.id} message={message} />
-          ))}
+          {messages.map((message) => {
+            if (message.role === "assistant" && !message.text && status === "submitted") return null;
+            return <ChatBubble key={message.id} message={message} />;
+          })}
           {status === "submitted" && <TypingIndicator />}
           {error && <ErrorMessage onRetry={regenerate} />}
         </div>

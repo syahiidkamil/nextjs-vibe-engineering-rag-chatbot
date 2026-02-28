@@ -20,8 +20,8 @@ export async function POST(req: Request) {
   const queryText = lastUserMessage.text ?? lastUserMessage.content ?? "";
   const queryEmbedding = await embedQuery(queryText);
   const searchResults = await searchDocuments(queryEmbedding);
-  const { contextText, sources } = buildRagContext(searchResults);
-  const systemPrompt = getSystemPrompt(contextText);
+  const { contextText, sources, hasRelevantContext } = buildRagContext(searchResults);
+  const systemPrompt = getSystemPrompt(contextText, hasRelevantContext);
 
   // Convert to Gemini message format
   const geminiMessages = messages.map(

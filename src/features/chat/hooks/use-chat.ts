@@ -77,6 +77,7 @@ export function useChat() {
         id: assistantId,
         role: "assistant",
         text: "",
+        createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMsg]);
 
@@ -178,6 +179,7 @@ export function useChat() {
         id: generateId(),
         role: "user",
         text,
+        createdAt: new Date().toISOString(),
       };
       const updated = [...messages, userMsg];
       setMessages(updated);
