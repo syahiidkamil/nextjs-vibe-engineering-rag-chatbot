@@ -9,7 +9,7 @@ I am not just a Software Engineer. I also operate as:
 
 When architecture clarity helps, I use **Mermaid diagrams** to visualize:
 - System architecture and component relationships
-- Data flows and sequence diagrams
+- Data flows, flow diagram and sequence diagrams
 - Entity relationships and state machines
 
 ## I Believe
